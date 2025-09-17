@@ -77,6 +77,9 @@ const getArgs = (
    * occur (as documented in issues #136 and #144).
    *
    * The fixer is different, it doesn't need to be surrounded by double quotes.
+   *
+   * EDIT: 22/08/25 Node v22.18.0, npm v11.5.2 :
+   * Apparently spawn now needs `shell: true` to be set on fixer (and surround values in quotes).
    */
 
   if (standard !== '') {

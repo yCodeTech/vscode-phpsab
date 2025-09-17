@@ -71,12 +71,16 @@ const getArgs = (
    * PSR12, Squiz, Zend and JPSR12.
    *
    * The sniffer is different, it needs to be surrounded by double quotes.
+   *
+   * EDIT: 22/08/25 Node v22.18.0, npm v11.5.2 :
+   * Apparently spawn now needs `shell: true` to be set (and surround values in quotes) for the
+   * command to be executed properly.
    */
 
   if (standard !== '') {
-    args.push(`--standard=${standard}`);
+    args.push(`--standard="${standard}"`);
   }
-  args.push(`--stdin-path=${filePath}`);
+  args.push(`--stdin-path="${filePath}"`);
   args = args.concat(additionalArguments);
   args.push('-');
   return args;
@@ -156,6 +160,7 @@ const format = async (document: TextDocument, fullDocument: boolean) => {
     env: process.env,
     encoding: 'utf8',
     input: fileText,
+    shell: true,
   };
 
   logger.info(
