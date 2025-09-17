@@ -16,6 +16,12 @@ import {
   window,
   workspace,
 } from 'vscode';
+import {
+  getErrorMsg,
+  getMappedExitCode,
+  getStandardDisabledErrorMsg,
+  isStandardDisabled,
+} from './errors';
 import { PHPCSMessageType, PHPCSReport } from './interfaces/phpcs-report';
 import { Settings } from './interfaces/settings';
 import { logger } from './logger';
@@ -150,11 +156,12 @@ const validate = async (document: TextDocument) => {
     tty: true,
     shell: true,
   };
-  logger.info(
-    `SNIFFER COMMAND: ${resourceConf.executablePathCS} ${lintArgs.join(' ')}`,
-  );
 
-  const sniffer = spawn(resourceConf.executablePathCS, lintArgs, options);
+  const executablePathCS = `"${resourceConf.executablePathCS}"`;
+
+  logger.info(`SNIFFER COMMAND: ${executablePathCS} ${lintArgs.join(' ')}`);
+
+  const sniffer = spawn(executablePathCS, lintArgs, options);
 
   sniffer.stdin.write(fileText);
   sniffer.stdin.end();
@@ -166,8 +173,27 @@ const validate = async (document: TextDocument) => {
   sniffer.stderr.on('data', (data) => (stderr += data));
 
   const done = new Promise<void>((resolve, reject) => {
-    sniffer.on('close', () => {
+    sniffer.on('close', (code) => {
+      // Log the sniffer status code and message.
+      // Has to be in a Promise `then` callback function to resolve the promise to a value.
+      // Can't use async/await here.
+      getMappedExitCode(code, 'sniffer').then((mappedCode) => {
+        const errorMsg = getErrorMsg(mappedCode, 'sniffer');
+
+        logger.info(`SNIFFER STATUS: ${mappedCode} - ${errorMsg}`);
+      });
+
       if (token.isCancellationRequested || !stdout) {
+        if (isStandardDisabled(standard, 'phpcs', stdout, stderr)) {
+          const message = getStandardDisabledErrorMsg(
+            standard,
+            'phpcs',
+            stdout,
+            stderr,
+          );
+          logger.info(`SNIFFER: ${message}`);
+          window.showErrorMessage(message);
+        }
         resolve();
         return;
       }
@@ -204,6 +230,8 @@ const validate = async (document: TextDocument) => {
         resolve();
       } catch (error) {
         let message = '';
+        const errorString = error.toString();
+
         if (stdout) {
           message += `${stdout}\n`;
         }
@@ -211,17 +239,31 @@ const validate = async (document: TextDocument) => {
           message += `${stderr}\n`;
         }
         if (error instanceof Error) {
-          message += error.toString();
+          message += errorString;
         } else {
           message += 'Unexpected error';
         }
+
+        if (isStandardDisabled(standard, 'phpcs', stdout, stderr)) {
+          message = getStandardDisabledErrorMsg(
+            standard,
+            'phpcs',
+            stdout,
+            stderr,
+          );
+        }
+
         window.showErrorMessage(message);
-        logger.error(message);
+        logger.error(message, error);
         reject(message);
       }
       diagnosticCollection.set(document.uri, diagnostics);
       runner.dispose();
       runnerCancellations.delete(document.uri);
+    });
+
+    sniffer.on('error', (error) => {
+      logger.error(`SNIFFER ERROR: ${error}`);
     });
   });
 

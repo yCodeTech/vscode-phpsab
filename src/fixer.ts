@@ -11,6 +11,12 @@ import {
   window,
   workspace,
 } from 'vscode';
+import {
+  getErrorMsg,
+  getMappedExitCode,
+  getStandardDisabledErrorMsg,
+  isStandardDisabled,
+} from './errors';
 import { ConsoleError } from './interfaces/console-error';
 import { Settings } from './interfaces/settings';
 import { logger } from './logger';
@@ -163,38 +169,40 @@ const format = async (document: TextDocument, fullDocument: boolean) => {
     shell: true,
   };
 
-  logger.info(
-    `FIXER COMMAND: ${resourceConf.executablePathCBF} ${lintArgs.join(' ')}`,
-  );
+  const executablePathCBF = `"${resourceConf.executablePathCBF}"`;
 
-  const fixer = spawn.sync(resourceConf.executablePathCBF, lintArgs, options);
+  logger.info(`FIXER COMMAND: ${executablePathCBF} ${lintArgs.join(' ')}`);
+
+  const fixer = spawn.sync(executablePathCBF, lintArgs, options);
   const stdout = fixer.stdout.toString().trim();
 
   let fixed = stdout;
 
-  let errors: { [key: number]: string } = {
-    3: 'FIXER: A general script execution error occurred.',
-    16: 'FIXER: Configuration error of the application.',
-    32: 'FIXER: Configuration error of a Fixer.',
-    64: 'FIXER: Exception raised within the application.',
-    255: 'FIXER: A Fatal execution error occurred.',
+  let nodeErrors: { [key: string]: string } = {
+    ERR_OPERATION_FAILED: 'A general script execution error occurred.',
+    ENOENT: 'No such file or directory',
+    ETIMEDOUT: 'Script execution timed out.',
   };
+
+  const exitcode = await getMappedExitCode(fixer.status, 'fixer');
+  const errorMsg = getErrorMsg(exitcode, 'fixer');
+
+  logger.info(`FIXER STATUS: ${exitcode} - ${errorMsg}`);
+
+  if (stderr) {
+    logger.error(`FIXER STDERR: ${stderr}`);
+  }
 
   let error: string = '';
   let result: string = '';
-  let message: string = 'No fixable errors were found.';
+  let message: string = '';
 
-  /**
-   * fixer exit codes:
-   * Exit code 0 is used to indicate that no fixable errors were found, so nothing was fixed
-   * Exit code 1 is used to indicate that all fixable errors were fixed correctly
-   * Exit code 2 is used to indicate that FIXER failed to fix some of the fixable errors it found
-   * Exit code 3 is used for general script execution errors
-   */
-  switch (fixer.status) {
-    case null: {
-      // deal with some special case errors
-      error = 'A General Execution error occurred.';
+  switch (exitcode) {
+    case '-1': {
+      // Status is `null`, but we have to encode it as '-1'.
+
+      // Deal with some special case errors
+      error = nodeErrors['ERR_OPERATION_FAILED'];
 
       if (fixer.error === undefined) {
         break;
@@ -210,45 +218,72 @@ const format = async (document: TextDocument, fullDocument: boolean) => {
       break;
     }
     case 0: {
-      if (settings.debug) {
-        window.showInformationMessage(message);
-      }
-      break;
-    }
-    case 1: {
+      // No fixable errors were found; OR
+      // all errors were fixed successfully
+
+      // If the file was fixed then the exit code means all errors were fixed successfully.
       if (fixed.length > 0 && fixed !== fileText) {
         result = fixed;
         message = 'All fixable errors were fixed correctly.';
       }
-
-      if (settings.debug) {
-        window.showInformationMessage(message);
+      // Otherwise, there were no fixable errors found.
+      else {
+        message = 'No fixable errors were found.';
       }
 
       break;
     }
-    case 2: {
+    case 5: {
+      // Partially fixed errors.
+
       if (fixed.length > 0 && fixed !== fileText) {
         result = fixed;
-        message = 'FIXER failed to fix some of the fixable errors.';
+        message = `FIXER: ${errorMsg}`;
+      }
+      // Otherwise, if node internal error occurred, show the error message.
+      else if (fixer.error != null) {
+        error = `FIXER - Node Internal Error: ${fixer.error.message}`;
+        error += '\n' + nodeErrors[fixer.error.code];
       }
 
-      if (settings.debug) {
-        window.showInformationMessage(message);
-      }
       break;
     }
-    default:
-      error = errors[fixer.status];
-      if (fixed.length > 0) {
-        error += '\n' + fixed + '\n';
+    default: {
+      // Errors...
+
+      if (isStandardDisabled(standard, 'phpcbf', stdout, stderr)) {
+        error = getStandardDisabledErrorMsg(standard, 'phpcbf', stdout, stderr);
       }
-      logger.error(fixed);
+      // Otherwise...
+      else {
+        // A PHPCBF error occurred.
+        error = `FIXER: ${errorMsg}`;
+
+        // If fixed output is available, append it to the error message.
+        if (fixed.length > 0) {
+          error += '\n' + fixed + '\n';
+        }
+        // Otherwise, output the standard error message from the node process.
+        else if (fixer.error != null) {
+          error = `FIXER - Node Internal Error: ${fixer.error.message}`;
+          error += '\n' + nodeErrors[fixer.error.code];
+        }
+        // If no specific error is found, return a generic fatal error.
+        else {
+          error = 'FATAL: Unknown error occurred.';
+        }
+      }
+    }
+  }
+  if (settings.debug && error === '') {
+    window.showInformationMessage(message);
+    logger.info(`FIXER MESSAGE: ${message}`);
   }
 
   logger.endTimer('Fixer');
 
   if (error !== '') {
+    logger.error(error);
     return Promise.reject(error);
   }
 
