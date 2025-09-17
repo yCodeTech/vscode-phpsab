@@ -6,7 +6,7 @@ import { commands, ExtensionContext, extensions, languages } from 'vscode';
 import { activateFixer, registerFixerAsDocumentProvider } from './fixer';
 import { disposeLogger, logger } from './logger';
 import { loadSettings } from './settings';
-import { activateSniffer, disposeSniffer } from './sniffer';
+import { activateSniffer, disposeSniffer, snifferVersion } from './sniffer';
 
 /**
  * Activate Extension
@@ -18,9 +18,12 @@ export const activate = async (context: ExtensionContext) => {
   const extensionVersion =
     extensions.getExtension(extensionId)?.packageJSON.version;
 
+  const version = await snifferVersion();
+
   // Always output extension information to channel on activate
   logger.log(`Extension ID: ${extensionId}.`);
   logger.log(`Extension Version: ${extensionVersion}.`);
+  logger.log(`PHPCS Version: ${version}.`);
 
   const settings = await loadSettings();
   activateFixer(context.subscriptions, settings);

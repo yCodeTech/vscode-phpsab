@@ -1,5 +1,6 @@
 import spawn from 'cross-spawn';
 import { debounce } from 'lodash';
+import { SpawnSyncOptions } from 'node:child_process';
 import {
   CancellationTokenSource,
   ConfigurationChangeEvent,
@@ -7,11 +8,11 @@ import {
   DiagnosticCollection,
   DiagnosticSeverity,
   Disposable,
+  languages,
   Range,
   TextDocument,
   TextDocumentChangeEvent,
   Uri,
-  languages,
   window,
   workspace,
 } from 'vscode';
@@ -318,4 +319,33 @@ export const activateSniffer = async (
 
   refresh();
   setValidatorListener();
+};
+
+export const snifferVersion = async () => {
+  const document = window.activeTextEditor?.document;
+  const workspaceFolder = workspace.getWorkspaceFolder(document.uri);
+  if (!workspaceFolder) {
+    return;
+  }
+  const settings = await getSettings();
+  const resourceConf = settings.resources[workspaceFolder.index];
+
+  const options: SpawnSyncOptions = {
+    cwd:
+      resourceConf.workspaceRoot !== null
+        ? resourceConf.workspaceRoot
+        : undefined,
+    env: process.env,
+    encoding: 'utf8',
+    shell: true,
+  };
+
+  const executablePathCS = `"${resourceConf.executablePathCS}"`;
+
+  const version = spawn.sync(executablePathCS, ['--version'], options);
+  const output = version.stdout.toString().trim();
+  const semverMatch = output.match(/(\d+\.\d+\.\d+(?:-[^\s]+)?)/);
+  const semver = semverMatch ? semverMatch[1] : '';
+
+  return semver;
 };
