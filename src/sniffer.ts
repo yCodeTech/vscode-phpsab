@@ -1,5 +1,5 @@
+import spawn from 'cross-spawn';
 import { debounce } from 'lodash';
-import { spawn } from 'node:child_process';
 import {
   CancellationTokenSource,
   ConfigurationChangeEvent,
